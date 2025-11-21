@@ -26,8 +26,8 @@ sed -i 's/192.168.1.1/10.7.7.1/g' package/base-files/files/bin/config_generate
 sed -i 's/192.168.1.1/10.7.7.1/g' package/base-files/luci2/bin/config_generate
 
 #修改默认主机名
-sed -i "s/hostname='.*'/hostname='TIKTOK直播专用'/g" ./package/base-files/files/bin/config_generate
-sed -i 'shostname='.*'/hostname='TIKTOK直播专用'/g' package/base-files/luci2/bin/config_generate
+sed -i "s/hostname='.*'/hostname='GJ-Link'/g" ./package/base-files/files/bin/config_generate
+sed -i 'shostname='.*'/hostname='GJ-Link'/g' package/base-files/luci2/bin/config_generate
 
 
 
