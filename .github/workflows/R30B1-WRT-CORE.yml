@@ -108,12 +108,6 @@ jobs:
 
           cd ./wrt/ && echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
 
-          # 如果不存在 defconfig 则报错终止
-          #if [ ! -d "defconfig" ]; then
-            #echo "::error::defconfig directory not found in cloned repository. Please check WRT_REPO and WRT_BRANCH inputs."
-            #exit 1
-          #fi
-
           # GitHub Action 移除国内下载源
           PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
           if [ -f "$PROJECT_MIRRORS_FILE" ]; then
@@ -209,14 +203,16 @@ jobs:
         run: |
           cd ./wrt/package/
 
-          # 添加脚本存在性检查
+          # 添加脚本存在性检查和执行权限
           if [ -f "$GITHUB_WORKSPACE/Scripts/Packages.sh" ]; then
+            chmod +x "$GITHUB_WORKSPACE/Scripts/Packages.sh"
             $GITHUB_WORKSPACE/Scripts/Packages.sh
           else
             echo "::warning::Packages.sh not found, skipping"
           fi
 
           if [ -f "$GITHUB_WORKSPACE/Scripts/Handles.sh" ]; then
+            chmod +x "$GITHUB_WORKSPACE/Scripts/Handles.sh"
             $GITHUB_WORKSPACE/Scripts/Handles.sh
           else
             echo "::warning::Handles.sh not found, skipping"
@@ -229,8 +225,16 @@ jobs:
           if [[ "${WRT_CONFIG,,}" == *"test"* ]]; then
             cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt >> .config
           else
-            find ./defconfig -type f -iname "*$WRT_CONFIG*" -exec cat {} + | sort | uniq > .config
+            # 如果源码仓库有 defconfig 目录则合并匹配文件
+            if [ -d "./defconfig" ]; then
+              find ./defconfig -type f -iname "*$WRT_CONFIG*" -exec cat {} + | sort | uniq > .config
+            else
+              echo "No defconfig directory found, starting with empty .config"
+              touch .config
+            fi
+
             if [ -f "$GITHUB_WORKSPACE/Scripts/Settings-lede.sh" ]; then
+              chmod +x "$GITHUB_WORKSPACE/Scripts/Settings-lede.sh"
               $GITHUB_WORKSPACE/Scripts/Settings-lede.sh
             else
               echo "::warning::Settings-lede.sh not found, skipping"
