@@ -199,6 +199,19 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
+          # 修复 vlmcsd AS 变量冲突：
+          # OpenWrt 构建环境设置 AS="gcc -c <flags>"，但 vlmcsd 的 GNUmakefile 第513行使用 $(AS)
+          # 作为编译命令的一部分。当 AS 包含 -c 时，与 CC -o 组合会产生多个输入文件，
+          # 导致 "cannot specify '-o' with '-c', '-S' or '-E' with multiple files" 错误。
+          # 通过 MAKE_FLAGS 将 AS 覆盖为空字符串来解决此冲突。
+          VLMCSD_FEED_MK="feeds/packages/net/vlmcsd/Makefile"
+          if [ -f "$VLMCSD_FEED_MK" ]; then
+            if ! grep -q 'MAKE_FLAGS += AS=""' "$VLMCSD_FEED_MK"; then
+              sed -i '/^include $(TOPDIR)\/rules.mk/a MAKE_FLAGS += AS=""' "$VLMCSD_FEED_MK"
+              echo "vlmcsd: AS variable cleared via MAKE_FLAGS"
+            fi
+          fi
+
       - name: Custom Packages
         run: |
           cd ./wrt/package/
