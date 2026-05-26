@@ -1,4 +1,4 @@
-#云编译公用核心
+# 云编译公用核心 - R30B1 设备专用
 name: R30B1-WRT-CORE
 
 on:
@@ -41,6 +41,10 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: write
+  actions: write
+
 env:
   GITHUB_TOKEN: ${{secrets.GH_TOKEN}}
   WRT_CONFIG: ${{inputs.WRT_CONFIG}}
@@ -62,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Projects
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
 
       - name: Install host build dependencies
         if: runner.os == 'Linux'
@@ -104,10 +108,10 @@ jobs:
 
           cd ./wrt/ && echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
 
-          # 如果不存在 defconfig 则直接结束工作流
+          # 如果不存在 defconfig 则报错终止
           if [ ! -d "defconfig" ]; then
-            echo "defconfig directory not found, stopping workflow."
-            exit 0
+            echo "::error::defconfig directory not found in cloned repository. Please check WRT_REPO and WRT_BRANCH inputs."
+            exit 1
           fi
 
           # GitHub Action 移除国内下载源
@@ -118,12 +122,17 @@ jobs:
 
       - name: Check Scripts
         run: |
-          find ./ -maxdepth 3 -type f -iregex ".*\(txt\|sh\)$" -exec dos2unix {} \; -exec chmod +x {} \;
+          # 确保在 wrt 目录内执行 dos2unix
+          if [ -d "./wrt" ]; then
+            find ./wrt -maxdepth 3 -type f -iregex ".*\(txt\|sh\)$" -exec dos2unix {} \; -exec chmod +x {} \;
+          else
+            echo "::warning::wrt directory not found, skipping dos2unix."
+          fi
 
       - name: Check Caches
         id: check-cache
         if: env.WRT_TEST != 'true'
-        uses: actions/cache@main
+        uses: actions/cache@v4
         with:
           key: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_HASH}}
           restore-keys: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}
@@ -159,29 +168,39 @@ jobs:
       - name: Update Feeds
         run: |
           cd ./wrt/
-          
-          # 注释原行（精确匹配原URL和版本）
-          sed -i '/src-git luci https:\/\/github.com\/coolsnowwolf\/luci\.git;openwrt-23.05/s/^/#/' "feeds.conf.default"
-          # 添加新行到文件末尾
-          #24.1 uci
-          echo "src-git luci https://github.com/coolsnowwolf/luci.git;openwrt-24.10" >> "feeds.conf.default"
-          cp "$GITHUB_WORKSPACE/Scripts/npc/rc2.local" package/base-files/files/etc/rc.local
-          chmod +x package/base-files/files/etc/rc.local
-          #cp "$GITHUB_WORKSPACE/Scripts/npc/npc" package/base-files/files/etc/init.d/npc
-          #chmod +x package/base-files/files/etc/init.d/npc
-          cp "$GITHUB_WORKSPACE/Scripts/npc/npc.conf" package/base-files/files/etc/npc.conf
-          chmod +x package/base-files/files/etc/npc.conf
-          cp "$GITHUB_WORKSPACE/r30b1/filogic.mk" target/linux/mediatek/image/filogic.mk
-          chmod +x target/linux/mediatek/image/filogic.mk
-          cp "$GITHUB_WORKSPACE/r30b1/mt7981b-clt-r30b1-112m.dts" target/linux/mediatek/dts/mt7981b-clt-r30b1-112m.dts
-          chmod +x target/linux/mediatek/dts/mt7981b-clt-r30b1-112m.dts
-          cp "$GITHUB_WORKSPACE/r30b1/mt7981b-clt-r30b1.dts" target/linux/mediatek/dts/mt7981b-clt-r30b1.dts
-          chmod +x target/linux/mediatek/dts/mt7981b-clt-r30b1.dts
-          cp "$GITHUB_WORKSPACE/r30b1/02_network" target/linux/mediatek/filogic/base-files/etc/board.d/02_network
-          # 修改wifi名称脚本
-          cp "$GITHUB_WORKSPACE/r30b1/mac80211.sh" package/kernel/mac80211/files/lib/wifi/mac80211.sh
-          echo "r30b1和3000M dts文件替换成功"
-          
+
+          # 替换 luci feed：删除所有 luci 相关行，然后添加新版本
+          if grep -q "coolsnowwolf/luci" "feeds.conf.default"; then
+            # 删除所有包含 coolsnowwolf/luci 的行（不管是否被注释）
+            sed -i '/coolsnowwolf\/luci/d' "feeds.conf.default"
+            echo "src-git luci https://github.com/coolsnowwolf/luci.git;openwrt-24.10" >> "feeds.conf.default"
+            echo "luci feed updated to openwrt-24.10"
+          else
+            echo "::warning::coolsnowwolf/luci feed not found in feeds.conf.default, skipping replacement"
+          fi
+
+          # 复制自定义文件到固件中（添加存在性检查）
+          copy_custom_file() {
+            local src="$1"
+            local dst="$2"
+            if [ -f "$src" ]; then
+              cp "$src" "$dst"
+              chmod +x "$dst"
+              echo "Copied: $src -> $dst"
+            else
+              echo "::warning::Custom file not found: $src"
+            fi
+          }
+
+          copy_custom_file "$GITHUB_WORKSPACE/Scripts/npc/rc2.local" "package/base-files/files/etc/rc.local"
+          copy_custom_file "$GITHUB_WORKSPACE/Scripts/npc/npc.conf" "package/base-files/files/etc/npc.conf"
+          copy_custom_file "$GITHUB_WORKSPACE/r30b1/filogic.mk" "target/linux/mediatek/image/filogic.mk"
+          copy_custom_file "$GITHUB_WORKSPACE/r30b1/mt7981b-clt-r30b1-112m.dts" "target/linux/mediatek/dts/mt7981b-clt-r30b1-112m.dts"
+          copy_custom_file "$GITHUB_WORKSPACE/r30b1/mt7981b-clt-r30b1.dts" "target/linux/mediatek/dts/mt7981b-clt-r30b1.dts"
+          copy_custom_file "$GITHUB_WORKSPACE/r30b1/02_network" "target/linux/mediatek/filogic/base-files/etc/board.d/02_network"
+          copy_custom_file "$GITHUB_WORKSPACE/r30b1/mac80211.sh" "package/kernel/mac80211/files/lib/wifi/mac80211.sh"
+
+          echo "r30b1 和 3000M dts 文件替换完成"
 
           ./scripts/feeds update -a
           ./scripts/feeds install -a
@@ -190,8 +209,18 @@ jobs:
         run: |
           cd ./wrt/package/
 
-          $GITHUB_WORKSPACE/Scripts/Packages.sh
-          $GITHUB_WORKSPACE/Scripts/Handles.sh
+          # 添加脚本存在性检查
+          if [ -f "$GITHUB_WORKSPACE/Scripts/Packages.sh" ]; then
+            $GITHUB_WORKSPACE/Scripts/Packages.sh
+          else
+            echo "::warning::Packages.sh not found, skipping"
+          fi
+
+          if [ -f "$GITHUB_WORKSPACE/Scripts/Handles.sh" ]; then
+            $GITHUB_WORKSPACE/Scripts/Handles.sh
+          else
+            echo "::warning::Handles.sh not found, skipping"
+          fi
 
       - name: Custom Settings
         run: |
@@ -201,10 +230,15 @@ jobs:
             cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt >> .config
           else
             find ./defconfig -type f -iname "*$WRT_CONFIG*" -exec cat {} + | sort | uniq > .config
-            $GITHUB_WORKSPACE/Scripts/Settings-lede.sh
+            if [ -f "$GITHUB_WORKSPACE/Scripts/Settings-lede.sh" ]; then
+              $GITHUB_WORKSPACE/Scripts/Settings-lede.sh
+            else
+              echo "::warning::Settings-lede.sh not found, skipping"
+            fi
             cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt $GITHUB_WORKSPACE/Config/GENERAL.txt >> .config
           fi
-          make defconfig -j$(nproc) && make clean -j$(nproc)
+          # defconfig 和 clean 目标不支持多线程，去掉 -j 参数
+          make defconfig && make clean
 
       - name: Download Packages
         if: env.WRT_TEST != 'true'
@@ -234,7 +268,7 @@ jobs:
 
       - name: Package Firmware
         run: |
-          cd ./wrt/ && mkdir ./upload/
+          cd ./wrt/ && mkdir -p ./upload/
 
           cp -f ./.config ./upload/Config-"$WRT_CONFIG"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_DATE".txt
 
@@ -245,19 +279,34 @@ jobs:
             find ./bin/targets/ -iregex ".*\(buildinfo\|json\|sha256sums\|packages\)$" -exec rm -rf {} +
 
             for FILE in $(find ./bin/targets/ -type f -iname "*$WRT_TARGET*") ; do
-              EXT=$(basename $FILE | cut -d '.' -f 2-)
-              NAME=$(basename $FILE | cut -d '.' -f 1 | grep -io "\($WRT_TARGET\).*")
-              NEW_FILE="$WRT_INFO"-"$WRT_BRANCH"-"$NAME"-"$WRT_DATE"."$EXT"
-              mv -f $FILE ./upload/$NEW_FILE
+              BASENAME=$(basename "$FILE")
+              # 改进扩展名提取：提取最后一个点号后的内容作为扩展名
+              if [[ "$BASENAME" =~ \. ]]; then
+                EXT="${BASENAME##*.}"
+                NAME="${BASENAME%.*}"
+              else
+                EXT=""
+                NAME="$BASENAME"
+              fi
+              # 从文件名中提取包含 WRT_TARGET 的部分
+              NAME=$(echo "$NAME" | grep -io "\($WRT_TARGET\).*")
+              if [ -n "$NAME" ]; then
+                if [ -n "$EXT" ]; then
+                  NEW_FILE="$WRT_INFO"-"$WRT_BRANCH"-"$NAME"-"$WRT_DATE"."$EXT"
+                else
+                  NEW_FILE="$WRT_INFO"-"$WRT_BRANCH"-"$NAME"-"$WRT_DATE"
+                fi
+                mv -f "$FILE" ./upload/"$NEW_FILE"
+              fi
             done
 
             find ./bin/targets/ -type f -exec mv -f {} ./upload/ \;
 
-            make clean -j$(nproc)
+            make clean
           fi
 
       - name: Release Firmware
-        uses: softprops/action-gh-release@master
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-${{env.WRT_DATE}}
           files: ./wrt/upload/*.*
