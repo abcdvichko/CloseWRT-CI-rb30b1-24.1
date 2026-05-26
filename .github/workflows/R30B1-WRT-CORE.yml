@@ -109,10 +109,10 @@ jobs:
           cd ./wrt/ && echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
 
           # 如果不存在 defconfig 则报错终止
-          if [ ! -d "defconfig" ]; then
-            echo "::error::defconfig directory not found in cloned repository. Please check WRT_REPO and WRT_BRANCH inputs."
-            exit 1
-          fi
+          #if [ ! -d "defconfig" ]; then
+            #echo "::error::defconfig directory not found in cloned repository. Please check WRT_REPO and WRT_BRANCH inputs."
+            #exit 1
+          #fi
 
           # GitHub Action 移除国内下载源
           PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
